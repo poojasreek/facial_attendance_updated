@@ -1,0 +1,17 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Generated runtime and training datasets
+TrainingImage/
+TrainingImageLabel/
+Attendance/
+StudentDetails/
+
+# Temporary and test artifacts
+*.tmp
+.pytest_cache/
+.coverage
+htmlcov/
+scratch/

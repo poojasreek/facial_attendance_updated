@@ -33,3 +33,39 @@ HELP OPTION IN MENUBAR:
 
 CHANGE PASSWORD OPTION:
 ![Screenshot (13)](https://user-images.githubusercontent.com/37211676/58502146-97539380-81a3-11e9-8536-0c68160ecc55.png)
+
+---
+
+## Repaired Features and Enhancements
+
+### 1. Registered Students Directory (Feature A)
+- Full interactive `ttk.Treeview` table displaying **Student ID**, **Roll Number**, and **Student Name**.
+- Dynamically populated from authoritative persistent records (`StudentDetails/StudentDetails.csv`).
+- Displays the exact registered student count synchronized with the table view.
+- Includes a manual **Refresh List** action, automatic reload on tab selection, and graceful empty-state handling.
+
+### 2. Real-Time Identity Display Above Face (Feature B)
+- Face identification is completely separated from attendance deduplication.
+- Recognizes students and continuously displays their **Name and Roll Number** directly above the bounding box on every frame.
+- If attendance has already been recorded today, the overlay continues to show their identity with a status indicator (`Attendance already marked today`) without appending duplicate CSV records.
+- LBPH confidence/distance threshold is set to a calibrated `70.0` (distances < 70 indicate high-confidence identification, >= 70 render as distinct red `Unknown` boxes).
+
+### 3. Roll Number Uniqueness Enforcement (Feature C)
+- Strict uniqueness policy: Roll numbers are case-insensitive and invariant to surrounding whitespace (e.g., ` 2023pecec390 ` normalizes to `2023PECEC390`).
+- Authoritative pre-check against persistent storage before initializing camera or capturing training images.
+- Safe atomic file replacement prevents partial writes and file corruption.
+- Interrupted or cancelled image captures are safely cleaned up to prevent orphaned images or corrupted dataset states.
+
+### Running the Application & Test Suite
+
+```bash
+# Run main application
+python main.py
+
+# Run comprehensive automated tests
+python run_all_tests.py
+
+# Audit existing student records for duplicate roll numbers
+python audit_and_migrate.py
+```
+
