@@ -44,26 +44,24 @@ class TestMockedCameraAndWorkflow(unittest.TestCase):
         shutil.rmtree(self.test_dir, ignore_errors=True)
 
     def test_mocked_webcam_registration_success(self):
-        """Simulate capturing 100 face images from a camera and saving registration."""
+        """Simulate capturing 15 face images from a camera and saving registration."""
         roll = "2023PECEC390"
         name = "Sanjay P"
         serial = 1
 
         # Mock frame and detector
         fake_frame = np.zeros((480, 640, 3), dtype=np.uint8)
-        # Mock face coordinates (x, y, w, h)
-        mock_faces = [(100, 100, 80, 80)]
 
-        # Simulate camera loop taking 100 samples
+        # Simulate camera loop taking 15 samples
         sample_count = 0
-        for i in range(1, 101):
+        for i in range(1, 16):
             sample_count += 1
             img_path = os.path.join(self.training_img_dir, f"{name}.{serial}.{roll}.{sample_count}.jpg")
             # Save cropped dummy grayscale face
             cv2.imwrite(img_path, fake_frame[100:180, 100:180, 0])
 
-        self.assertEqual(sample_count, 100)
-        self.assertEqual(len(os.listdir(self.training_img_dir)), 100)
+        self.assertEqual(sample_count, 15)
+        self.assertEqual(len(os.listdir(self.training_img_dir)), 15)
 
         # Save record
         save_student_record(self.student_csv, serial, roll, name)
@@ -72,18 +70,18 @@ class TestMockedCameraAndWorkflow(unittest.TestCase):
         self.assertEqual(records[0]["roll"], roll)
 
     def test_mocked_webcam_registration_aborted(self):
-        """Simulate user pressing 'q' after 15 images: images are cleaned up and no CSV row written."""
+        """Simulate user pressing 'q' after 7 images (less than 15): images are cleaned up and no CSV row written."""
         roll = "2023PECEC390"
         name = "Sanjay P"
         serial = 1
 
         fake_frame = np.zeros((480, 640, 3), dtype=np.uint8)
-        # Simulate only 15 frames captured before user quit
-        for i in range(1, 16):
+        # Simulate only 7 frames captured before user pressed 'q'
+        for i in range(1, 8):
             img_path = os.path.join(self.training_img_dir, f"{name}.{serial}.{roll}.{i}.jpg")
             cv2.imwrite(img_path, fake_frame[100:180, 100:180, 0])
 
-        self.assertEqual(len(os.listdir(self.training_img_dir)), 15)
+        self.assertEqual(len(os.listdir(self.training_img_dir)), 7)
 
         # Cancellation triggers cleanup
         cleanup_partial_registration(self.training_img_dir, serial, roll)

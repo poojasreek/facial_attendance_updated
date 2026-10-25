@@ -35,7 +35,8 @@ DEFAULT_ATTENDANCE_DIR = "Attendance"
 LBPH_CONFIDENCE_THRESHOLD = 70.0
 
 # Number of face samples to capture per student registration
-SAMPLES_PER_STUDENT = 100
+SAMPLES_PER_STUDENT = 15
+
 
 
 def assure_path_exists(path: str) -> None:
