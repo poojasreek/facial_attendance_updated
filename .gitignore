@@ -11,7 +11,9 @@ StudentDetails/
 
 # Temporary and test artifacts
 *.tmp
+data_backup*/
 .pytest_cache/
 .coverage
 htmlcov/
 scratch/
+
