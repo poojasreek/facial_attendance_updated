@@ -22,7 +22,9 @@ from attendance_core import (
     load_attendance_records,
     draw_face_annotations,
     cleanup_partial_registration,
+    normalize_roll_number,
     LBPH_CONFIDENCE_THRESHOLD,
+
 )
 
 
@@ -93,59 +95,83 @@ class TestMockedCameraAndWorkflow(unittest.TestCase):
 
     def test_mocked_recognition_and_attendance_loop(self):
         """
-        Simulate real-time webcam tracking frames:
-        Frame 1: Sanjay P recognized -> attendance marked, overlay drawn.
-        Frame 2: Sanjay P recognized again -> attendance NOT duplicated, overlay STILL drawn with Sanjay P and 'Attendance already marked today'.
-        Frame 3: Unknown person recognized -> overlay drawn as Unknown, no attendance.
+        Simulate real-time webcam tracking frames with the new session-based status logic:
+
+        Session state:
+          previously_marked_rolls: rolls marked BEFORE camera opened (pre-loaded from CSV)
+          session_marked_rolls:    rolls marked IN this session {norm_roll: time_str}
+
+        Frame 1: Sanjay P first seen this session -> attendance marked, status = 'Attendance Marked! (HH:MM:SS)'
+        Frame 2: Sanjay P seen again in same session -> status = 'Attendance Marked! (same time)', no duplicate row
+        Frame 3: Unknown person -> overlay drawn as Unknown, no attendance written
+        Frame 4: Student pre-marked before session -> status = 'Already marked today (HH:MM:SS)'
         """
+        import datetime as dt_module
+
         save_student_record(self.student_csv, 1, "2023PECEC390", "Sanjay P")
+        save_student_record(self.student_csv, 2, "2023PECEC391", "Pooja K")
         records = load_student_records(self.student_csv)
         mapping = get_student_mapping(records)
 
-        today_csv = os.path.join(self.attendance_dir, "Attendance_24-10-2026.csv")
-        marked_cache = set()
+        today_csv = os.path.join(self.attendance_dir, "Attendance_25-10-2026.csv")
 
-        # --- FRAME 1: Sanjay P appears for the first time ---
-        pred_label, pred_dist = 1, 38.5  # Confident match
-        student_name, roll_num, is_known = identify_face(pred_label, pred_dist, mapping, LBPH_CONFIDENCE_THRESHOLD)
+        # Pre-mark Pooja K before camera opens (simulate earlier session or restart)
+        mark_attendance(today_csv, "2023PECEC391", "Pooja K")
+
+        # Load pre-session state (mirrors TrackImages startup)
+        initial_records = load_attendance_records(today_csv)
+        previously_marked_rolls = {r["normalized_roll"]: r.get("time", "") for r in initial_records}
+        session_marked_rolls = {}  # newly marked in this camera session
+
+        # Verify Pooja K is pre-marked
+        self.assertIn("2023PECEC391", previously_marked_rolls)
+        self.assertNotIn("2023PECEC390", previously_marked_rolls)
+
+        # --- FRAME 1: Sanjay P appears for the first time this session ---
+        student_name, roll_num, is_known = identify_face(1, 38.5, mapping, LBPH_CONFIDENCE_THRESHOLD)
         self.assertTrue(is_known)
         self.assertEqual(student_name, "Sanjay P")
-        self.assertEqual(roll_num, "2023PECEC390")
 
-        # Mark attendance
-        marked, status_msg = mark_attendance(today_csv, roll_num, student_name, cached_set=marked_cache)
+        norm_roll = normalize_roll_number(roll_num)
+        self.assertNotIn(norm_roll, session_marked_rolls)
+        self.assertNotIn(norm_roll, previously_marked_rolls)
+
+        now = dt_module.datetime.now()
+        time_str = now.strftime('%H:%M:%S')
+        marked, _ = mark_attendance(today_csv, roll_num, student_name, dt=now)
         self.assertTrue(marked)
-        self.assertIn("marked for Sanjay P", status_msg)
+        session_marked_rolls[norm_roll] = time_str
+        status_msg1 = f"Attendance Marked! ({time_str})"
 
-        # Draw overlay on frame
         frame1 = np.zeros((480, 640, 3), dtype=np.uint8)
-        draw_face_annotations(frame1, 100, 100, 120, 120, student_name, roll_num, is_known, status_msg)
+        draw_face_annotations(frame1, 100, 100, 120, 120, student_name, roll_num, is_known, status_msg1)
         self.assertTrue(np.any(frame1 > 0))
 
-        # --- FRAME 2: Sanjay P remains in front of the camera ---
-        pred_label2, pred_dist2 = 1, 41.2
-        student_name2, roll_num2, is_known2 = identify_face(pred_label2, pred_dist2, mapping, LBPH_CONFIDENCE_THRESHOLD)
+        # Verify exactly 2 rows in CSV (Pooja K + Sanjay P)
+        att_rows = load_attendance_records(today_csv)
+        self.assertEqual(len(att_rows), 2)
+
+        # --- FRAME 2: Sanjay P still in front of camera ---
+        student_name2, roll_num2, is_known2 = identify_face(1, 41.2, mapping, LBPH_CONFIDENCE_THRESHOLD)
         self.assertTrue(is_known2)
-        self.assertEqual(student_name2, "Sanjay P")
-        self.assertEqual(roll_num2, "2023PECEC390")
+        norm_roll2 = normalize_roll_number(roll_num2)
 
-        # Check attendance
-        is_already_marked = is_attendance_marked(roll_num2, today_csv, marked_cache)
-        self.assertTrue(is_already_marked)
-        status_msg2 = "Attendance already marked today"
+        # Must be in session_marked_rolls (marked this session)
+        self.assertIn(norm_roll2, session_marked_rolls)
+        status_msg2 = f"Attendance Marked! ({session_marked_rolls[norm_roll2]})"
+        self.assertIn("Attendance Marked!", status_msg2)
 
-        # Identity MUST NOT disappear! Draw overlay again with Sanjay P
+        # Identity overlay still draws Sanjay P
         frame2 = np.zeros((480, 640, 3), dtype=np.uint8)
         draw_face_annotations(frame2, 100, 100, 120, 120, student_name2, roll_num2, is_known2, status_msg2)
         self.assertTrue(np.any(frame2 > 0))
 
-        # Check attendance CSV: still exactly 1 record
-        att_rows = load_attendance_records(today_csv)
-        self.assertEqual(len(att_rows), 1)
+        # CSV still has exactly 2 rows - no duplicate written
+        att_rows2 = load_attendance_records(today_csv)
+        self.assertEqual(len(att_rows2), 2)
 
         # --- FRAME 3: Unknown person enters frame ---
-        pred_label3, pred_dist3 = 1, 88.0  # High distance (unrecognized)
-        student_name3, roll_num3, is_known3 = identify_face(pred_label3, pred_dist3, mapping, LBPH_CONFIDENCE_THRESHOLD)
+        student_name3, roll_num3, is_known3 = identify_face(1, 88.0, mapping, LBPH_CONFIDENCE_THRESHOLD)
         self.assertFalse(is_known3)
         self.assertEqual(student_name3, "Unknown")
         self.assertEqual(roll_num3, "")
@@ -154,9 +180,31 @@ class TestMockedCameraAndWorkflow(unittest.TestCase):
         draw_face_annotations(frame3, 100, 100, 120, 120, student_name3, roll_num3, is_known3, "")
         self.assertTrue(np.any(frame3 > 0))
 
-        # Attendance file still has 1 record
-        att_rows = load_attendance_records(today_csv)
-        self.assertEqual(len(att_rows), 1)
+        # Still 2 rows
+        att_rows3 = load_attendance_records(today_csv)
+        self.assertEqual(len(att_rows3), 2)
+
+        # --- FRAME 4: Pooja K (pre-marked before session) enters frame ---
+        student_name4, roll_num4, is_known4 = identify_face(2, 35.0, mapping, LBPH_CONFIDENCE_THRESHOLD)
+        self.assertTrue(is_known4)
+        self.assertEqual(student_name4, "Pooja K")
+
+        norm_roll4 = normalize_roll_number(roll_num4)
+        self.assertNotIn(norm_roll4, session_marked_rolls)   # not marked this session
+        self.assertIn(norm_roll4, previously_marked_rolls)   # was marked before session opened
+
+        prev_time = previously_marked_rolls[norm_roll4]
+        status_msg4 = f"Already marked today ({prev_time})" if prev_time else "Attendance already marked today"
+        self.assertIn("marked today", status_msg4)
+
+        # Identity still shown for Pooja K
+        frame4 = np.zeros((480, 640, 3), dtype=np.uint8)
+        draw_face_annotations(frame4, 100, 100, 120, 120, student_name4, roll_num4, is_known4, status_msg4)
+        self.assertTrue(np.any(frame4 > 0))
+
+        # CSV still has exactly 2 rows
+        att_rows4 = load_attendance_records(today_csv)
+        self.assertEqual(len(att_rows4), 2)
 
 
 if __name__ == "__main__":

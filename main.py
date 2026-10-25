@@ -379,8 +379,11 @@ def TrackImages():
 
     # Attendance file for today
     today_attendance_file = get_attendance_filepath(DEFAULT_ATTENDANCE_DIR)
-    # Memory cache of normalized rolls already marked today for instant lookup
-    today_marked_rolls = {r["normalized_roll"] for r in load_attendance_records(today_attendance_file)}
+    # Records already marked prior to this camera session
+    initial_marked_records = load_attendance_records(today_attendance_file)
+    previously_marked_rolls = {r["normalized_roll"]: r.get("time", "") for r in initial_marked_records}
+    # Tracks rolls marked in the CURRENT active camera session: {norm_roll: time_str}
+    session_marked_rolls = {}
 
     # Open webcam
     cam = cv2.VideoCapture(0)
@@ -417,23 +420,35 @@ def TrackImages():
                 status_msg = ""
                 if is_known:
                     norm_roll = normalize_roll_number(roll)
-                    # Check if attendance is already recorded today
-                    if norm_roll in today_marked_rolls:
-                        status_msg = "Attendance already marked today"
+                    # 1. Did we just mark attendance for this student in this session?
+                    if norm_roll in session_marked_rolls:
+                        marked_time = session_marked_rolls[norm_roll]
+                        status_msg = f"Attendance Marked! ({marked_time})"
+                    # 2. Was attendance already recorded prior to this session?
+                    elif norm_roll in previously_marked_rolls:
+                        prev_time = previously_marked_rolls[norm_roll]
+                        if prev_time:
+                            status_msg = f"Already marked today ({prev_time})"
+                        else:
+                            status_msg = "Attendance already marked today"
+                    # 3. Newly detected: mark attendance now
                     else:
-                        # Record attendance according to workflow
+                        now_dt = datetime.datetime.now()
+                        time_str = now_dt.strftime('%H:%M:%S')
                         marked, mark_msg = mark_attendance(
                             today_attendance_file,
                             roll,
                             name,
-                            cached_set=today_marked_rolls
+                            dt=now_dt
                         )
                         if marked:
-                            status_msg = "Attendance Marked"
+                            session_marked_rolls[norm_roll] = time_str
+                            status_msg = f"Attendance Marked! ({time_str})"
                             # Immediately update the GUI table
                             load_attendance_ui()
                         else:
                             status_msg = "Attendance already marked today"
+
 
                 # Always draw identity above the face box on the live frame
                 draw_face_annotations(im, x, y, w, h, name, roll, is_known, status_msg)
